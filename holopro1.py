@@ -13,8 +13,14 @@ tts.setProperty('volume', 0.9)
 # ========== APP SETUP ==========
 app = Ursina(title="HOLO Professional", borderless=True, fullscreen=True)
 window.color = color.black
-Sky(color=color.black)
-
+backdrop = Entity(
+    parent=camera,               # Attaches it to the camera
+    model='quad', 
+    texture='library.png',       # Your high-quality library image
+    scale=(40, 25),              # Scale to fit the screen
+    position=(0, 0, 20),         # Move it far behind the character
+    color=color.gray(0.3)        # Darken it so the librarian pops
+)
 # ========== BLOOM/GLOW POST-PROCESSING ==========
 # Simple bloom using camera filter
 class HologramShader(Shader):
@@ -117,8 +123,22 @@ lower_ring = Entity(
 
 # ========== LIBRARY ENVIRONMENT ==========
 # Floor with grid
-floor = Entity(model='plane', scale=(40, 1, 40), texture='white_cube', color=color.rgb(5, 5, 15))
+floor = Entity(
+    model='plane', 
+    scale=(100, 1, 100), 
+    color=color.black,           # Black floor hides the "edge" where the image starts
+    position=(0, 0, 0)
+)
 
+# 3. Add a "Glow Base" under her feet to anchor her
+base_glow = Entity(
+    model='cylinder',
+    scale=(3, 0.05, 3),
+    position=(0, 0.01, 0),
+    color=color.cyan,
+    alpha=0.2,
+    shader=holo_shader
+)
 # Bookshelves (left & right)
 for side in [-1, 1]:
     for i in range(8):
