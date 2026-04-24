@@ -1,3 +1,4 @@
+from ursina.prefabs.editor_camera import EditorCamera
 from ursina import *
 from ursina.shaders import *
 import pyttsx3
@@ -48,21 +49,19 @@ class HologramShader(Shader):
 holo_shader = HologramShader()
 
 # ========== CINEMATIC BACKGROUND ==========
-# Using the high-quality library image as a flat backdrop
-# Fixed the color error by using color.rgb()
-backdrop = Entity(
-    parent=camera, 
-    model='quad', 
-    texture='library.png', 
-    scale=(50, 50), 
-    position=(0, 0, 30), 
-    color=color.rgb(0.8, 0.8, 0.8) # This dims the image so the cyan pops
-    )    
-backdrop.texture.filtering=None
+# ========== 3D LIBRARY ENVIRONMENT ==========
+# Load your newly converted .glb file
+library_env = Entity(
+    model='library.glb',  # Make sure the name matches your downloaded file exactly
+    scale=1,              # We will likely need to adjust this!
+    position=(0, 0, 0)
+)
 
-
-# Dark floor to ground the character
-floor = Entity(model='plane', scale=(100, 1, 100), color=color.black, position=(0, 0, 0),alpha=0.7)
+# ========== 3D LIGHTING (CRUCIAL) ==========
+# 3D rooms are pitch black without lights. This adds a sun and soft ambient room light.
+sun = DirectionalLight(y=2, z=3, shadows=True, color=color.white)
+sun.look_at(Vec3(0, -1, 1))
+AmbientLight(color=color.rgba(150, 150, 150, 0.5))
 
 # ========== THE LIBRARIAN ==========
 librarian = Entity(
@@ -118,4 +117,6 @@ if __name__ == '__main__':
         time.sleep(2)
         speak("System online. Welcome to the archives. I am HOLO.")
     threading.Thread(target=intro, daemon=True).start()
+    EditorCamera()
     app.run()
+
