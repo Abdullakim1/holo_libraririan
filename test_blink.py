@@ -5,10 +5,10 @@ import time
 
 app = Ursina()
 
-anime_actor = Actor('anime_v3.glb')
+anime_actor = Actor('anime_v5.glb')
 player = Entity()
 anime_actor.reparent_to(player)
-player.rotation_x = -270
+player.rotation_x = -180
 
 mouth_control = anime_actor.controlJoint(None, 'modelRoot', 'MouthOpen')
 blink_control = anime_actor.controlJoint(None, 'modelRoot', 'Blink')

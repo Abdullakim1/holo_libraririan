@@ -6,12 +6,12 @@ import time # Added time import since your script uses time.time()
 app = Ursina()
 
 # 1. Load the new model that has the Blink key
-anime_actor = Actor('anime_v3.glb')
+anime_actor = Actor('anime_v7.glb')
 
 # 2. Attach it to an Ursina Entity
 player = Entity()
 anime_actor.reparent_to(player)
-player.rotation_x = -270
+player.rotation_x = -180
 
 # 3. Take control of the Blink Morph Target instead of the mouth
 # Make sure the name matches EXACTLY what the file check script output
