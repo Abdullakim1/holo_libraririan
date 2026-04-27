@@ -4,13 +4,13 @@ from direct.actor.Actor import Actor
 app = Ursina()
 
 # 1. Load the model and KILL ghost animations
-anime_actor = Actor('anime_v11.glb')
+anime_actor = Actor('anime_v7.glb')
 anime_actor.stop() 
 
 # 2. Attach and stand her up
 player = Entity()
 anime_actor.reparent_to(player)
-player.rotation_x = -270
+player.rotation_x = 180
 
 # 3. Grab both controls
 mouth_control = anime_actor.controlJoint(None, 'modelRoot', 'MouthOpen')
