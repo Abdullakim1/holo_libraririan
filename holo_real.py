@@ -1,16 +1,20 @@
 from ursina import *
 from ursina.shaders import *
 from direct.actor.Actor import Actor
-import pyttsx3
 import threading
 import time
 import math
 import random
+import asyncio
+import edge_tts
+import subprocess
+import tempfile
+import os
 
-# ========== TTS ==========
-tts = pyttsx3.init()
-tts.setProperty('rate', 150)
-tts.setProperty('volume', 0.9)
+# ========== SPEECH FUNCTION ==========
+is_talking = False
+
+VOICE = "en-US-JennyNeural"  # Natural American female voice
 
 # ========== APP SETUP ==========
 app = Ursina(title="HOLO Professional", borderless=True, fullscreen=True)
@@ -155,12 +159,24 @@ is_talking = False
 def speak(text):
     global is_talking
     is_talking = True
+    
     def _tts():
-        tts.say(text)
-        tts.runAndWait()
-        time.sleep(0.5)
-        global is_talking
-        is_talking = False
+        async def run_tts():
+            communicate = edge_tts.Communicate(text, VOICE)
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as tmp:
+                tmp_path = tmp.name
+            await communicate.save(tmp_path)
+            
+            # Play the audio
+            subprocess.run(['mpv', '--no-video', '--really-quiet', tmp_path], 
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            os.unlink(tmp_path)
+            
+            global is_talking
+            is_talking = False
+        
+        asyncio.run(run_tts())
+    
     threading.Thread(target=_tts, daemon=True).start()
 
 # ========== ANIMATION ==========
