@@ -20,7 +20,7 @@ character = AnimeCharacter()
 
 # Status text
 status_text = Text(
-    text="Press SPACE to talk or T to type",
+    text="Listening for 'Hey HOLO' or press SPACE/T...",
     position=(0, 0.45), color=color.cyan, size=0.03, origin=(0, 0)
 )
 
@@ -33,7 +33,7 @@ def on_user_input(text):
 speech = SpeechSystem(on_user_input)
 speech.set_status_callback(lambda t: setattr(status_text, 'text', t))
 
-# ========== KEYBOARD INPUT ==========
+# ========== KEYBOARD INPUT (fallback) ==========
 keyboard_text = ""
 input_active = False
 
@@ -59,7 +59,7 @@ def input(key):
         if input_active:
             keyboard_text = ""
             input_active = False
-            status_text.text = "Press SPACE to talk or T to type"
+            status_text.text = "Listening for 'Hey HOLO' or press SPACE/T..."
     
     elif input_active and len(key) == 1:
         keyboard_text += key
@@ -69,38 +69,31 @@ def input(key):
         keyboard_text = keyboard_text[:-1]
         status_text.text = "Type: " + keyboard_text
 
-# ========== ANIMATION LOOP ==========
 def update():
     t = time.time()
     
-    # Character animation
     character.update_position()
     
-    # Mouth movement
     if speech.is_talking:
         mouth_weight = 0.3 + abs(math.sin(t * 12)) * 0.7
     else:
         mouth_weight = (math.sin(t * 2) + 1.0) * 0.05
     character.set_mouth(mouth_weight)
     
-    # Blink animation
     blink_cycle = math.sin(t * 1.5) * 0.5 + 0.5
     blink_weight = 1.0 if blink_cycle > 0.92 else 0.0
     character.set_blink(blink_weight)
     
-    # Environment
     environment.update(speech.is_talking)
 
-# ========== CAMERA ==========
 camera.position = config.CAMERA_POS
 camera.look_at(config.CAMERA_LOOK)
 
-# ========== RUN ==========
 if __name__ == '__main__':
     print("\n" + "="*50)
     print("🌀 HOLO - AI Hologram Librarian")
     print("="*50)
-    print("SPACE: Speak | T: Type | ESC: Quit")
+    print("Say 'Hey HOLO' | SPACE: Speak | T: Type | ESC: Quit")
     print("="*50 + "\n")
     
     def intro():

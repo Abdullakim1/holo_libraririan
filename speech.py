@@ -19,7 +19,8 @@ class SpeechSystem:
     def __init__(self, on_user_input_callback):
         self.is_talking = False
         self.is_listening = False
-        self.wake_word_active = True
+        self.conversation_active = False
+        self.last_speech_time = 0
         self.on_user_input = on_user_input_callback
         self.status_callback = None
         
@@ -27,7 +28,7 @@ class SpeechSystem:
         self.recognizer = sr.Recognizer()
         self.recognizer.energy_threshold = 400
         self.recognizer.dynamic_energy_threshold = True
-        self.recognizer.pause_threshold = 1.0
+        self.recognizer.pause_threshold = 0.8
         
         # Microphone check
         try:
@@ -50,13 +51,13 @@ class SpeechSystem:
         try:
             self.vosk_model = vosk.Model(config.VOSK_MODEL_PATH)
             self.vosk_recognizer = vosk.KaldiRecognizer(self.vosk_model, 16000)
-            self.vosk_recognizer.SetWords(True)  # Enable word timing
+            self.vosk_recognizer.SetWords(True)
             self.audio_queue = queue.Queue()
             self.wake_word = config.WAKE_WORD.lower()
-            print(f"✅ Listening for wake word: '{self.wake_word}' (Offline Vosk)")
-            self.set_status(f"Say '{self.wake_word}'...")
+            print(f"✅ Vosk ready! Wake word: '{self.wake_word}'")
+            self.set_status("Say 'wake up holo' or wave hand...")
         except Exception as e:
-            print(f"⚠️ Wake word disabled: {e}")
+            print(f"⚠️ Vosk disabled: {e}")
             self.vosk_model = None
             self.set_status("Press SPACE to talk or T to type")
     
@@ -67,7 +68,7 @@ class SpeechSystem:
         self.audio_queue.put(bytes(indata))
     
     def _wake_word_loop(self):
-        """Continuously listen for wake word using Vosk"""
+        """Listen for wake word using Vosk in background"""
         try:
             with sd.RawInputStream(
                 samplerate=16000,
@@ -77,7 +78,7 @@ class SpeechSystem:
                 channels=1,
                 callback=self._audio_callback
             ):
-                print(f"🎤 Microphone active - speak now...")
+                print(f"🎤 Wake word listener active...")
                 
                 while self.wake_word_active:
                     audio_data = self.audio_queue.get()
@@ -86,56 +87,118 @@ class SpeechSystem:
                         result = json.loads(self.vosk_recognizer.Result())
                         text = result.get('text', '').lower()
                         
-                        # DEBUG: Print everything Vosk hears
-                        if text and len(text) > 1:
-                            print(f"  Heard: '{text}'")
-                        
-                        # Check for individual words too
-                        words = text.split()
-                        wake_parts = self.wake_word.split()
-                        
-                        # Match full wake word OR individual words
-                        if self.wake_word in text or any(word in words for word in wake_parts if len(word) > 2):
-                            print(f"🎯 WAKE WORD DETECTED! Full text: '{text}'")
-                            
-                            if not self.is_talking and not self.is_listening:
-                                self.set_status("Wake word detected! Listening...")
-                                self.listen()
+                        # Only respond to wake word when not in conversation
+                        if text and not self.conversation_active and not self.is_talking:
+                            if self.wake_word in text:
+                                print(f"🎯 Wake word: '{text}'")
+                                self.start_conversation()
                     
-                    # Check partial results for faster deection
+                    # Partial results for faster detection
                     else:
                         partial = json.loads(self.vosk_recognizer.PartialResult())
                         text = partial.get('partial', '').lower()
                         
-                        # DEBUG: Show partial results
-                        if text and len(text) > 1:
-                            print(f"  Partial: '{text}'")
-                        
-                        if self.wake_word in text:
-                            print(f"⚡ WAKE WORD in partial! '{text}'")
-                            
-                            if not self.is_talking and not self.is_listening:
-                                self.set_status("Wake word detected! Listening...")
-                                self.listen()
+                        if self.wake_word in text and not self.conversation_active and not self.is_talking:
+                            print(f"⚡ Wake word detected!")
+                            self.start_conversation()
                                 
         except Exception as e:
-            print(f"Wake word loop error: {e}")
-            import traceback
-            traceback.print_exc()
-            self.set_status("Wake word error. Press SPACE to talk.")
+            print(f"Wake word error: {e}")
+   
+    def start_conversation(self):
+        """Start continuous conversation mode - called by wake word, wave, or SPACE"""
+        if self.conversation_active:
+            return  # Already in conversation
+        
+        self.conversation_active = True
+        self.last_speech_time = time.time()
+        print("🗣️ Conversation mode ON - speak freely!")
+        self.set_status("🗣️ Listening... speak now!")
+        
+        # Start continuous listening in background
+        conv_thread = threading.Thread(target=self._continuous_listen, daemon=True)
+        conv_thread.start()
+    
+    def stop_conversation(self):
+        """End conversation mode"""
+        self.conversation_active = False
+        print("💤 Conversation mode OFF")
+        self.set_status("Say 'wake up holo' or wave hand...")
+    
+    def _continuous_listen(self):
+        """Continuously listen during conversation - runs until timeout"""
+        silence_timeout = config.CONVERSATION_TIMEOUT  # From config
+        
+        while self.conversation_active:
+            # Wait if HOLO is talking
+            if self.is_talking:
+                self.last_speech_time = time.time()
+                time.sleep(0.3)
+                continue
+            
+            # Check for silence timeout
+            if time.time() - self.last_speech_time > silence_timeout:
+                print(f"⏰ {silence_timeout}s silence - ending conversation")
+                self.stop_conversation()
+                break
+            
+            # Try to hear user
+            try:
+                with self.microphone as source:
+                    self.recognizer.adjust_for_ambient_noise(source, duration=0.3)
+                    
+                    try:
+                        audio = self.recognizer.listen(source, timeout=2, phrase_time_limit=8)
+                        user_text = None
+                        
+                        # Try Google first
+                        try:
+                            user_text = self.recognizer.recognize_google(audio)
+                        except:
+                            # Fallback to Sphinx
+                            try:
+                                user_text = self.recognizer.recognize_sphinx(audio)
+                            except:
+                                pass
+                        
+                        if user_text and len(user_text.strip()) > 1:
+                            print(f"  🗣️: {user_text}")
+                            self.set_status("You: " + user_text)
+                            self.last_speech_time = time.time()
+                            
+                            # Check for exit phrases
+                            if any(phrase in user_text.lower() for phrase in ['goodbye', 'bye', 'thanks', 'thank you', 'that is all', 'stop']):
+                                print("👋 Exit phrase detected")
+                                self.stop_conversation()
+                                continue
+                            
+                            self.on_user_input(user_text)
+                        else:
+                            time.sleep(0.3)
+                    
+                    except sr.WaitTimeoutError:
+                        # Natural pause - just continue
+                        time.sleep(0.3)
+                    
+            except Exception as e:
+                print(f"Listen error: {e}")
+                time.sleep(1)
+        
+        print("💤 Conversation ended")
     
     def set_status_callback(self, callback):
+        """Set function to call for status updates"""
         self.status_callback = callback
     
     def set_status(self, text):
+        """Update status text in UI"""
         if self.status_callback:
             self.status_callback(text)
-        else:
-            print(f"Status: {text}")
     
     def speak(self, text):
-        """Speak text using Edge TTS"""
+        """Speak text using Edge TTS (natural female voice)"""
         self.is_talking = True
+        self.last_speech_time = time.time()
         self.set_status("HOLO: " + text[:80] + "...")
         
         def _tts():
@@ -146,69 +209,23 @@ class SpeechSystem:
                         tmp_path = tmp.name
                     await communicate.save(tmp_path)
                     
-                    subprocess.run(['mpv', '--no-video', '--really-quiet', tmp_path],
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.run(
+                        ['mpv', '--no-video', '--really-quiet', tmp_path],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
                     os.unlink(tmp_path)
                 except Exception as e:
                     print(f"TTS Error: {e}")
                 
                 self.is_talking = False
-                self.set_status(f"Say '{self.wake_word}'...")
+                
+                # Update status based on state
+                if self.conversation_active:
+                    self.set_status("🗣️ Speak now...")
+                else:
+                    self.set_status("Say 'wake up holo' or wave hand...")
             
             asyncio.run(run_tts())
         
-        threading.Thread(target=_tts, daemon=True).start()
-    
-    def listen(self):
-        """Listen for user speech after wake word"""
-        if self.is_listening or self.is_talking:
-            return
-        
-        if self.microphone is None:
-            self.set_status("No microphone! Press T to type.")
-            return
-        
-        self.is_listening = True
-        self.set_status("🎤 Listening...")
-        
-        def _listen():
-            try:
-                with self.microphone as source:
-                    self.recognizer.adjust_for_ambient_noise(source, duration=1)
-                    audio = self.recognizer.listen(source, timeout=5, phrase_time_limit=10)
-                    self.set_status("💭 Thinking...")
-                    
-                    user_text = None
-                    try:
-                        user_text = self.recognizer.recognize_google(audio)
-                        print(f"  Heard: {user_text}")
-                    except:
-                        try:
-                            user_text = self.recognizer.recognize_sphinx(audio)
-                            print(f"  Sphinx heard: {user_text}")
-                        except:
-                            pass
-                    
-                    if not user_text:
-                        self.set_status("Couldn't understand. Please try again.")
-                        time.sleep(2)
-                        self.set_status(f"Say '{self.wake_word}'...")
-                        self.is_listening = False
-                        return
-                    
-                    self.set_status("You: " + user_text)
-                    self.on_user_input(user_text)
-                    
-            except sr.WaitTimeoutError:
-                self.set_status("No speech detected. Try again.")
-                time.sleep(2)
-                self.set_status(f"Say '{self.wake_word}'...")
-            except Exception as e:
-                print(f"Listen error: {e}")
-                self.set_status("Error. Please try again.")
-                time.sleep(2)
-                self.set_status(f"Say '{self.wake_word}'...")
-            
-            self.is_listening = False
-        
-        threading.Thread(target=_listen, daemon=True).start()
+        threading.Thread(target=_tts, daemon=True).start() 
