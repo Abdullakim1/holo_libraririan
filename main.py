@@ -32,14 +32,6 @@ speech.set_status_callback(lambda t: setattr(status_text, 'text', t))
 vision=VisionSystem()
 has_greeted=False
 
-def on_wave_detected():
-    global has_greeted
-    if not has_greeted and not speech.is_talking:
-        speech.speak("I see you waving! Hello! I am HOLO. How can I assist you?")
-        has_greeted = True
-        
-        # Start listening immediately after the greeting
-        speech.start_conversation()
 def on_person_changed(old_type, new_type):
     global has_greeted
     if new_type != "unknown" and not has_greeted and not speech.is_talking:
@@ -50,7 +42,6 @@ def on_person_changed(old_type, new_type):
         # Start listening immediately after the greeting
         speech.start_conversation()
 
-vision.set_wave_callback(on_wave_detected)
 vision.set_person_change_callback(on_person_changed)
 # Status text
 status_text = Text(

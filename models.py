@@ -52,6 +52,6 @@ class AnimeCharacter:
         """Float animation - call from main update loop"""
         import math, time
         t = time.time()
-        float_y = config.CHARACTER_POS[1] + math.sin(t * 1.5) * 0.2
+        float_y = (config.CHARACTER_POS[1]+0.5) + math.sin(t * 1.5) * 0.2
         self.character.y = float_y
         self.blink_parent.y = float_y
