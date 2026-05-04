@@ -1,4 +1,6 @@
+import time
 from ursina import *
+from vision import VisionSystem  # <--- ADD THIS LINE
 import math
 import time
 import threading
@@ -7,6 +9,7 @@ from models import AnimeCharacter
 from speech import SpeechSystem
 from ai import HoloAI
 from environment import Environment
+
 
 # ========== APP SETUP ==========
 app = Ursina(title="HOLO Professional", borderless=True, fullscreen=True)
@@ -18,13 +21,6 @@ ai = HoloAI()
 environment = Environment()
 character = AnimeCharacter()
 
-# Status text
-status_text = Text(
-    text="Listening for 'Hey HOLO' or press SPACE/T...",
-    position=(0, 0.45), color=color.cyan, size=0.03, origin=(0, 0)
-)
-
-# ========== INITIALIZE SPEECH ==========
 def on_user_input(text):
     """Called when user speaks or types something"""
     response = ai.get_response(text)
@@ -32,6 +28,35 @@ def on_user_input(text):
 
 speech = SpeechSystem(on_user_input)
 speech.set_status_callback(lambda t: setattr(status_text, 'text', t))
+
+vision=VisionSystem()
+has_greeted=False
+
+def on_wave_detected():
+    global has_greeted
+    if not has_greeted and not speech.is_talking:
+        speech.speak("I see you waving! Hello! I am HOLO. How can I assist you?")
+        has_greeted = True
+        
+        # Start listening immediately after the greeting
+        speech.start_conversation()
+def on_person_changed(old_type, new_type):
+    global has_greeted
+    if new_type != "unknown" and not has_greeted and not speech.is_talking:
+        greeting = vision.get_greeting()
+        speech.speak(greeting)
+        has_greeted = True
+        
+        # Start listening immediately after the greeting
+        speech.start_conversation()
+
+vision.set_wave_callback(on_wave_detected)
+vision.set_person_change_callback(on_person_changed)
+# Status text
+status_text = Text(
+    text="Listening for 'Hey HOLO' or press SPACE/T...",
+    position=(0, 0.45), color=color.cyan, size=0.03, origin=(0, 0)
+)
 
 # ========== KEYBOARD INPUT (fallback) ==========
 keyboard_text = ""
@@ -56,6 +81,8 @@ def input(key):
         input_active = False
     
     elif key == 'escape':
+        vision.cleanup() # <--- ADD THIS LINE to turn off the webcam
+        application.quit() # Close the app completely
         if input_active:
             keyboard_text = ""
             input_active = False
@@ -96,9 +123,4 @@ if __name__ == '__main__':
     print("Say 'Hey HOLO' | SPACE: Speak | T: Type | ESC: Quit")
     print("="*50 + "\n")
     
-    def intro():
-        time.sleep(2)
-        speech.speak("Hello. I am HOLO, your advanced hologram librarian. How may I assist you today?")
-    
-    threading.Thread(target=intro, daemon=True).start()
     app.run()

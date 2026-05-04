@@ -106,7 +106,7 @@ class VisionSystem:
             
             # Focus on upper portion of frame (where hands would be)
             upper_half = thresh[0:120, :]
-            motin_percent = (np.sum(upper_half > 0) / upper_half.size) * 100
+            motion_percent = (np.sum(upper_half > 0) / upper_half.size) * 100
             
             self.prev_frame = gray.copy()
             

@@ -20,6 +20,7 @@ class SpeechSystem:
         self.is_talking = False
         self.is_listening = False
         self.conversation_active = False
+        self.wake_word_active = True  # <--- ADD THIS LINE HERE
         self.last_speech_time = 0
         self.on_user_input = on_user_input_callback
         self.status_callback = None
@@ -124,23 +125,16 @@ class SpeechSystem:
         self.conversation_active = False
         print("💤 Conversation mode OFF")
         self.set_status("Say 'wake up holo' or wave hand...")
-    
     def _continuous_listen(self):
-        """Continuously listen during conversation - runs until timeout"""
-        silence_timeout = config.CONVERSATION_TIMEOUT  # From config
+        """Continuously listen during conversation - runs UNTIL explicitly dismissed"""
+        
+        # Notice: The silence_timeout logic has been completely removed!
         
         while self.conversation_active:
-            # Wait if HOLO is talking
+            # Wait if HOLO is currently talking
             if self.is_talking:
-                self.last_speech_time = time.time()
                 time.sleep(0.3)
                 continue
-            
-            # Check for silence timeout
-            if time.time() - self.last_speech_time > silence_timeout:
-                print(f"⏰ {silence_timeout}s silence - ending conversation")
-                self.stop_conversation()
-                break
             
             # Try to hear user
             try:
@@ -148,7 +142,8 @@ class SpeechSystem:
                     self.recognizer.adjust_for_ambient_noise(source, duration=0.3)
                     
                     try:
-                        audio = self.recognizer.listen(source, timeout=2, phrase_time_limit=8)
+                        # We listen for up to 2 seconds of silence, then loop back if nobody spoke
+                        audio = self.recognizer.listen(source, timeout=2, phrase_time_limit=15)
                         user_text = None
                         
                         # Try Google first
@@ -164,27 +159,36 @@ class SpeechSystem:
                         if user_text and len(user_text.strip()) > 1:
                             print(f"  🗣️: {user_text}")
                             self.set_status("You: " + user_text)
-                            self.last_speech_time = time.time()
                             
-                            # Check for exit phrases
-                            if any(phrase in user_text.lower() for phrase in ['goodbye', 'bye', 'thanks', 'thank you', 'that is all', 'stop']):
-                                print("👋 Exit phrase detected")
+                            # Check for natural exit phrases
+                            exit_phrases = [
+                                'goodbye', 'bye', 'thanks', 'thank you', 'that is all', 
+                                'stop', 'farewell', 'have a nice day', 'alright that is it', 
+                                'that will be all', 'go to sleep'
+                            ]
+                            
+                            if any(phrase in user_text.lower() for phrase in exit_phrases):
+                                print("👋 Exit phrase detected. HOLO going to standby.")
+                                # Let her say a quick goodbye before sleeping
+                                self.speak("Goodbye! Let me know if you need anything else.")
                                 self.stop_conversation()
                                 continue
                             
+                            # If it wasn't a goodbye, send it to Llama 3.2!
                             self.on_user_input(user_text)
+                            
                         else:
                             time.sleep(0.3)
                     
                     except sr.WaitTimeoutError:
-                        # Natural pause - just continue
+                        # Natural pause - you are just thinking or quiet. Keep listening!
                         time.sleep(0.3)
-                    
+            
             except Exception as e:
                 print(f"Listen error: {e}")
                 time.sleep(1)
         
-        print("💤 Conversation ended")
+        print("💤 Conversation ended")   
     
     def set_status_callback(self, callback):
         """Set function to call for status updates"""
