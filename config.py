@@ -5,7 +5,7 @@ VOICE = "en-US-JennyNeural"
 
 # Model files
 MOUTH_MODEL = "anime_v1.glb"
-BLINK_MODEL = "anime_v7.glb"
+BLINK_MODEL = "anime_v3.glb"
 
 # Camera
 CAMERA_POS = (0, 2.5, 15)

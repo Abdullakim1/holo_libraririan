@@ -1,4 +1,5 @@
 import time
+from database import LibraryDB
 from ursina import *
 from vision import VisionSystem  # <--- ADD THIS LINE
 import math
@@ -15,6 +16,7 @@ from environment import Environment
 app = Ursina(title="HOLO Professional", borderless=True, fullscreen=True)
 window.color = color.black
 Sky(color=color.black)
+db = LibraryDB()
 
 # ========== INITIALIZE MODULES ==========
 ai = HoloAI()
@@ -29,20 +31,43 @@ def on_user_input(text):
 speech = SpeechSystem(on_user_input)
 speech.set_status_callback(lambda t: setattr(status_text, 'text', t))
 
-vision=VisionSystem()
-has_greeted=False
+vision = VisionSystem()
+has_greeted = False
+
+# 1. Create the UI text object so it doesn't crash when updating!
+person_text = Text(
+    text="👤 Looking for users...",
+    position=(-0.85, 0.45), # Upper left corner
+    color=color.yellow, 
+    size=0.03
+)
 
 def on_person_changed(old_type, new_type):
     global has_greeted
-    if new_type != "unknown" and not has_greeted and not speech.is_talking:
-        greeting = vision.get_greeting()
-        speech.speak(greeting)
-        has_greeted = True
+    
+    age = vision.get_person_age()
+    person_text.text = f"👤 {new_type.title()} (Age: {age})"
+    print(f"⚙️ Vision Callback Triggered: {old_type} → {new_type} (Age: {age})")
+    
+    if old_type == "unknown" and new_type != "unknown":
+        print(f"🎯 New {new_type} detected!")
         
-        # Start listening immediately after the greeting
-        speech.start_conversation()
+        # 2. Use the greeting logic that is already perfectly written inside vision.py
+        greeting = vision.get_greeting()
+        
+        if not speech.is_talking:
+            print("⚙️ Triggering speech and conversation mode...")
+            speech.start_conversation()
+            
+            # Small delay so the Vosk wake word listener has time to turn off
+            threading.Thread(
+                target=lambda: (time.sleep(0.5), speech.speak(greeting)),
+                daemon=True
+            ).start()
 
+# 3. CRITICAL: You must plug the function into the vision system!
 vision.set_person_change_callback(on_person_changed)
+
 # Status text
 status_text = Text(
     text="Listening for 'Hey HOLO' or press SPACE/T...",

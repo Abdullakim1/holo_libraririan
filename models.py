@@ -25,7 +25,7 @@ class AnimeCharacter:
         # Blink model (invisible, morph targets only)
         self.blink_parent = Entity(
             position=config.CHARACTER_POS,
-            rotation_x=180,
+            rotation_x=-270,
             rotation_y=180,
             scale=config.CHARACTER_SCALE
         )
