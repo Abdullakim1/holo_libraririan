@@ -1,0 +1,7 @@
+venv/
+.env
+chroma_db/
+*.csv
+chroma_db/
+ultimate_library_50k.csv
+
