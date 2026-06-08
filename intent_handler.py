@@ -120,8 +120,21 @@ class IntentHandler:
                 search_query = params.get("query", user_input)
                 target_title = params.get("title", "")
                 
-                # 1. TRUST THE LLM: If the LLM specifically identified a book title the user is looking for, 
-                # check its stock directly before doing a broad vector search.
+                # 1. INITIALIZE SESSION MEMORY
+                if not hasattr(self.ai, 'seen_books_history'):
+                    self.ai.seen_books_history = []
+                if not hasattr(self.ai, 'last_valid_topic'):
+                    self.ai.last_valid_topic = ""
+
+                # If the user switches topics completely (e.g., Chemistry -> Astronomy), reset the session history
+                if search_query.lower() != self.ai.last_valid_topic.lower():
+                    # Only reset if they aren't explicitly asking for "more/other" options
+                    if not any(w in user_input.lower() for w in ["more", "different", "other", "else", "alternative"]):
+                        print(f"🔄 Topic shifted from '{self.ai.last_valid_topic}' to '{search_query}'. Clearing session memory pool.")
+                        self.ai.seen_books_history = []
+                        self.ai.last_valid_topic = search_query
+
+                # 2. TRUST THE LLM: Direct stock check if looking for a specific title
                 if target_title and target_title.lower() not in ["optional", "various", "none", "unknown"]:
                     self.db.cursor.execute("SELECT title, total_copies FROM books WHERE title ILIKE %s LIMIT 1", (f"%{target_title}%",))
                     db_hit = self.db.cursor.fetchone()
@@ -131,25 +144,24 @@ class IntentHandler:
                         self.db.cursor.execute("SELECT COUNT(*) FROM checkouts WHERE book_title = %s AND status = 'active'", (real_title,))
                         active_checkouts = self.db.cursor.fetchone()[0]
                         
-                        # If the exact book they asked about is checked out, tell them immediately.
                         if (total_copies - active_checkouts) <= 0:
                             return f"I see '{real_title}' in our catalog, but unfortunately, all copies are currently checked out by other members."
 
-                # 2. VECTOR SEARCH: Trust the LLM's query for broad topic/similarity searches
-                results = self.collection.query(query_texts=[str(search_query)], n_results=15)
+                # 3. VECTOR SEARCH: Pull a deeper slice (25 results) so we have plenty of runway
+                results = self.collection.query(query_texts=[str(search_query)], n_results=25)
                 
                 if results and results['metadatas'] and results['metadatas'][0]:
                     all_matches = results['metadatas'][0]
                     available_books = []
-                    
-                    # Track what was JUST on the screen so we don't repeat it immediately
-                    recent_titles = []
-                    if hasattr(self.ai, 'last_suggested_books') and self.ai.last_suggested_books:
-                        recent_titles = [b.get('title', '').lower() for b in self.ai.last_suggested_books]
 
-                    # 3. Filter for available stock and skip immediate duplicates
+                    # 4. Filter for stock and skip EVERYTHING seen in this session so far
                     for book_meta in all_matches:
                         title = book_meta.get('title', '')
+                        title_lower = title.lower()
+                        
+                        # Skip if already recommended to the user during this session
+                        if title_lower in self.ai.seen_books_history:
+                            continue
                         
                         self.db.cursor.execute("SELECT total_copies FROM books WHERE title = %s", (title,))
                         row = self.db.cursor.fetchone()
@@ -159,17 +171,20 @@ class IntentHandler:
                         active_checkouts = self.db.cursor.fetchone()[0]
                         
                         if (total_copies - active_checkouts) > 0:
-                            # Naturally skip what was just suggested so the user can just say "more"
-                            if title.lower() not in recent_titles:
-                                available_books.append(book_meta)
+                            available_books.append(book_meta)
                             
                         if len(available_books) == 3:
                             break
                     
+                    # If we ran completely out of books in the vector slice, reset history to allow a recycle
                     if not available_books:
-                        return "I found some matches, but unfortunately, those specific copies are checked out right now!"
+                        self.ai.seen_books_history = []
+                        return "I've shown you all our immediate recommendations for this topic! Let me know if you want to explore a different subject."
 
-                    # Save and display the clean results
+                    # 5. COMMIT TO SESSION MEMORY
+                    for b in available_books:
+                        self.ai.seen_books_history.append(b.get('title', '').lower())
+
                     self.ai.last_suggested_books = available_books 
                     found_books = [m['title'] for m in available_books]
                     book_list = ", ".join(found_books)
@@ -214,7 +229,7 @@ class IntentHandler:
         - "search_books" (User asks to find, suggest, or read books about a topic)
         - "checkout_book" (User explicitly wants to borrow/checkout a book)
         - "return_book" (User wants to return a book)
-        - "book_info" (User asks for the content, summary, or details of a book)
+        - "book_info" (User asks for the content, summary, or details of a book if user says it is not related or not relevant trigger chat)
         - "register" (User is telling you their name to sign up)
         - "chat" (General conversation, compliments, goodbyes, or random statements)
 
