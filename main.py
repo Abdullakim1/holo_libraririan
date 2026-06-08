@@ -18,6 +18,9 @@ from speech import SpeechSystem
 from ai import HoloAI
 from environment import Environment
 from intent_handler import IntentHandler
+from PIL import Image
+import io
+import requests
 
 # ========== APP SETUP ==========
 app = Ursina(title="HOLO Professional", borderless=True, fullscreen=True)
@@ -55,20 +58,30 @@ def download_and_show_covers(urls):
     global pending_cover_loads
     import glob
     
-    # 🧹 NEW: Clean up old temporary files from previous searches to save disk space
+    # 🧹 Clean up old temporary files from previous searches to save disk space
     for old_file in glob.glob("temp_cover_*.jpg"):
         try: os.remove(old_file)
         except: pass
 
     batch_ready_images = [] 
-    unique_stamp = int(time.time() * 1000) # 🔥 NEW: Unique ID to bypass Ursina cache
+    unique_stamp = int(time.time() * 1000) # Unique ID to bypass Ursina cache
     
     for i, url in enumerate(urls):
         if i >= 3: break # Max 3 covers
         try:
-            # 🔥 NEW: Make the filename unique so Ursina realizes it's a new image!
             local_filename = f"temp_cover_{i}_{unique_stamp}.jpg"
-            urllib.request.urlretrieve(url, local_filename)
+            
+            # 🔥 FIX: Use requests and PIL to download and force conversion to RGB
+            response = requests.get(url, timeout=5)
+            if response.status_code == 200:
+                img = Image.open(io.BytesIO(response.content))
+                
+                # Convert CMYK / RGBA directly into standard screen RGB
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                
+                # Save it out locally
+                img.save(local_filename, "JPEG")
             
             if os.path.exists(local_filename) and os.path.getsize(local_filename) > 0:
                 with open(local_filename, "rb") as f:

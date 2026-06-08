@@ -67,20 +67,38 @@ class IntentHandler:
         # 6. Book Information / Summaries
         if intent == "book_info":
             title_to_use = params.get("title", "")
-            if hasattr(self.ai, 'last_suggested_books') and self.ai.last_suggested_books:
-                if title_to_use:
-                    for b in self.ai.last_suggested_books:
-                        if title_to_use.lower() in b.get('title', '').lower():
-                            self.ai.last_suggested_books.remove(b)
-                            self.ai.last_suggested_books.insert(0, b)
-                            break
-                top_title = self.ai.last_suggested_books[0].get('title', 'this book')
+            
+            if title_to_use:
+                # Actually look up the book in the live database
+                self.db.cursor.execute("""
+                    SELECT title, description, total_copies, 
+                           (SELECT COUNT(*) FROM checkouts WHERE book_title = books.title AND status = 'active') as active_checkouts
+                    FROM books 
+                    WHERE title ILIKE %s LIMIT 1
+                """, (f"%{title_to_use}%",))
                 
-                self._update_cover_images([top_title]) # 🔥 PASS AS LIST
+                book_data = self.db.cursor.fetchone()
                 
-                return f"{spoken_response} Would you like me to check out '{top_title}' for you?"
+                if book_data:
+                    real_title, desc, total_copies, active_checkouts = book_data
+                    available = total_copies - active_checkouts
+                    
+                    self._update_cover_images([real_title])
+                    
+                    # Dynamically tell the user if it is checked out!
+                    if available > 0:
+                        stock_status = f"Good news, we currently have {available} copies available to borrow!"
+                    else:
+                        stock_status = "Unfortunately, all of our copies are currently checked out by other members."
+                    
+                    # Shorten the description so she doesn't read a massive wall of text
+                    short_desc = desc[:200] + "..." if len(desc) > 200 else desc
+                    
+                    return f"'{real_title}' is about: {short_desc} {stock_status}"
+                else:
+                    return f"I couldn't find a book exactly called '{title_to_use}' in our physical records, but I'd be happy to search for something similar!"
+            
             return spoken_response
-
         # 7. Transactions (Borrow / Return)
         if intent == "checkout_book":
             title = params.get("title", "")
@@ -95,7 +113,7 @@ class IntentHandler:
         if intent == "return_book":
             return self._return_book(params.get("title", ""))
 
-        # 8. ChromaDB Semantic Search
+        # 8. ChromaDB Semantic Search (Filtered by Availability)
         if intent == "search_books":
             print("🔍 Triggering ChromaDB Vector Search...")
             try:
@@ -104,17 +122,91 @@ class IntentHandler:
                     search_query = user_input
                 search_query = str(search_query)
                 
-                results = self.collection.query(query_texts=[search_query], n_results=3)
+                asking_for_more = any(word in user_input.lower() for word in ["more", "different", "other", "else", "options", "recommendations", "one more time"])
+                
+                recent_titles = []
+                if asking_for_more and hasattr(self.ai, 'last_suggested_books') and self.ai.last_suggested_books:
+                    recent_titles = [b.get('title', '').lower() for b in self.ai.last_suggested_books]
+                
+                results = self.collection.query(query_texts=[search_query], n_results=25)
                 
                 if results and results['metadatas'] and results['metadatas'][0]:
-                    self.ai.last_suggested_books = results['metadatas'][0] 
-                    found_books = [m['title'] for m in results['metadatas'][0]]
+                    all_matches = results['metadatas'][0]
+                    
+                    # 🔥 THE REAL FIX: Dynamic Reverse-Match Trap (Zero hardcoding)
+                    user_text_lower = user_input.lower()
+                    exact_requested_book = None
+                    
+                    # 1. Trust the AI parameter ONLY if you actually spoke those exact words
+                    llm_title = params.get("title", "").lower()
+                    if llm_title and llm_title not in ["optional", "various", "none", "big books"] and llm_title in user_text_lower:
+                        exact_requested_book = llm_title
+                        
+                    # 2. THE SMART FALLBACK: If the AI guessed wrong, check if you literally spoke the title of a top search result
+                    if not exact_requested_book:
+                        for book_meta in all_matches[:5]: # Look at the top 5 semantic matches
+                            db_title_lower = book_meta.get('title', '').lower()
+                            # If the database title (e.g. "good kings, bad kings") is explicitly in your speech
+                            if len(db_title_lower) > 3 and db_title_lower in user_text_lower:
+                                exact_requested_book = db_title_lower
+                                break
+
+                    if exact_requested_book:
+                        print(f"🎯 Dynamic Target trap active. Locked onto: '{exact_requested_book}'")
+                        for book_meta in all_matches:
+                            db_title = book_meta.get('title', '')
+                            
+                            if exact_requested_book in db_title.lower() or db_title.lower() in exact_requested_book:
+                                self.db.cursor.execute("SELECT total_copies FROM books WHERE title = %s", (db_title,))
+                                row = self.db.cursor.fetchone()
+                                total_copies = row[0] if row else 0
+                                
+                                self.db.cursor.execute("SELECT COUNT(*) FROM checkouts WHERE book_title = %s AND status = 'active'", (db_title,))
+                                active_checkouts = self.db.cursor.fetchone()[0]
+                                
+                                if (total_copies - active_checkouts) <= 0:
+                                    return f"Ah, I see '{db_title}' in our catalog! However, all copies are currently checked out by other members right now."
+                                break # If available, it breaks the trap and displays normally below
+                    
+                    available_books = []
+                    
+                    import random
+                    if asking_for_more:
+                        random.shuffle(all_matches)
+                    
+                    for book_meta in all_matches:
+                        title = book_meta.get('title')
+                        
+                        if asking_for_more and title.lower() in recent_titles:
+                            continue
+                        
+                        self.db.cursor.execute("SELECT total_copies FROM books WHERE title = %s", (title,))
+                        row = self.db.cursor.fetchone()
+                        total_copies = row[0] if row else 0
+                        
+                        self.db.cursor.execute("SELECT COUNT(*) FROM checkouts WHERE book_title = %s AND status = 'active'", (title,))
+                        active_checkouts = self.db.cursor.fetchone()[0]
+                        
+                        if (total_copies - active_checkouts) > 0:
+                            available_books.append(book_meta)
+                            
+                        if len(available_books) == 3:
+                            break
+                    
+                    if not available_books:
+                        return "I found some matches in the catalog, but unfortunately, all those copies are checked out right now!"
+
+                    self.ai.last_suggested_books = available_books 
+                    found_books = [m['title'] for m in available_books]
                     book_list = ", ".join(found_books)
                     
-                    self._update_cover_images(found_books) # 🔥 PASS ALL FOUND BOOKS
+                    self._update_cover_images(found_books)
                     
                     safe_response = spoken_response if spoken_response else "I can help with that."
-                    return f"{safe_response} I found some great matches: {book_list}."
+                    
+                    if asking_for_more:
+                        return f"Here are some different options for you: {book_list}."
+                    return f"{safe_response} I found some great available matches: {book_list}."
                 else:
                     return "I looked through the catalog, but couldn't find anything matching that."
             except Exception as e:
